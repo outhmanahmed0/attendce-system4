@@ -25,6 +25,14 @@ if (typeof window !== 'undefined' && !window.my) {
     scan: ({ success }) => {
       console.log('Mock: scan');
       setTimeout(() => success({ code: 'mock_qr_code_xyz' }), 800);
+    },
+    getLocation: ({ success }) => {
+      console.log('Mock: getLocation');
+      setTimeout(() => success({
+        latitude: 25.276987,
+        longitude: 55.296249,
+        accuracy: 10
+      }), 600);
     }
   };
 }
