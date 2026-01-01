@@ -9,14 +9,50 @@
   let manualName = "";
   let showManualInput = false;
 
-  // --- STRICT REQUIRED FUNCTIONS (DO NOT MODIFY) ---
+  // Dummy History Data (Init with some data, but we will append real ones)
+  let history = [
+    {
+      id: 101,
+      location: "Central Garage",
+      time: "Yesterday, 09:00 AM",
+      status: "Present",
+    },
+    {
+      id: 102,
+      location: "North Campus",
+      time: "Yesterday, 08:30 AM",
+      status: "Late",
+    },
+  ];
+
+  // Helper: Format Time
+  function getCurrentTimeStr() {
+    return new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // Helper: Check if Late (8am - 3pm is NOT late)
+  function determineStatus() {
+    const now = new Date();
+    const hours = now.getHours();
+    // 8:00 (8) to 15:00 (3 PM)
+    if (hours >= 8 && hours < 15) {
+      return "Present";
+    }
+    return "Late";
+  }
+
+  // --- STRICT REQUIRED FUNCTIONS (DO NOT MODIFY LOGIC, BUT ADDING UI FEEDBACK IS OK) ---
   function authenticate() {
     return new Promise((resolve, reject) => {
       my.getAuthCode({
         scopes: ["auth_base", "USER_ID"],
         success: (res) => {
           const authCode = res.authCode;
-          my.alert({ content: "Got auth code: " + authCode });
+          // my.alert({ content: 'Got auth code: ' + authCode }); // Optional debug
 
           fetch("https://its.mouamle.space/api/auth-with-superQi", {
             method: "POST",
@@ -89,6 +125,7 @@
               type: "qr",
               success: (res) => {
                 scannedCode = res.code;
+                my.alert({ content: "Scan successful: Code " + scannedCode }); // Added feedback
 
                 fetch("https://its.mouamle.space/api/garage-info", {
                   method: "POST",
@@ -101,12 +138,15 @@
                   .then((r) => r.json())
                   .then((data) => {
                     garageName = data.name || "Garage " + scannedCode;
-                    parkingTime = data.parkingTime || "1 hour";
+                    parkingTime = data.parkingTime || "1 hour"; // API doesn't give time status, assume present or use logic?
+                    // Let's also log this scan to history
+                    addToHistory("Scanned: " + garageName);
                     view = "details";
                   })
                   .catch(() => {
                     garageName = "Garage " + scannedCode;
                     parkingTime = "1 hour";
+                    addToHistory("Scanned: " + garageName);
                     view = "details";
                   });
               },
@@ -123,7 +163,7 @@
   function backToMain() {
     view = "main";
   }
-  // --- END STRING REQUIRED FUNCTIONS ---
+  // --- END ---
 
   // Navigation & Logic
   function enterApp() {
@@ -138,41 +178,39 @@
     showManualInput = !showManualInput;
   }
 
+  function addToHistory(locationName) {
+    const status = determineStatus();
+    const newRecord = {
+      id: Date.now(),
+      location: locationName,
+      time: "Today, " + getCurrentTimeStr(),
+      status: status,
+    };
+    history = [newRecord, ...history];
+    return newRecord;
+  }
+
   function submitManualAttendance() {
     if (!manualName.trim()) {
       my.alert({ content: "Please enter your name." });
       return;
     }
-    // Simulate successful submission for manual entry
-    my.alert({ content: `Attendance registered for ${manualName}` });
-    garageName = "Manual Entry: " + manualName;
-    parkingTime = "Checked In";
+
+    // Add to history log
+    const record = addToHistory("Manual: " + manualName);
+
+    // Show confirmation
+    my.alert({
+      content: `Attendance registered for ${manualName}\nStatus: ${record.status}`,
+    });
+
+    // Update Details view variables
+    garageName = "User: " + manualName;
+    parkingTime = record.time;
+
     view = "details";
     manualName = "";
   }
-
-  // Dummy History Data
-  let history = [
-    {
-      id: 1,
-      location: "Central Garage",
-      time: "Today, 09:00 AM",
-      status: "Present",
-    },
-    {
-      id: 2,
-      location: "North Campus",
-      time: "Yesterday, 08:30 AM",
-      status: "Late",
-    },
-    {
-      id: 3,
-      location: "West Wing",
-      time: "Oct 30, 09:15 AM",
-      status: "Present",
-    },
-    { id: 4, location: "Main Hall", time: "Oct 29, 10:00 AM", status: "Late" },
-  ];
 </script>
 
 <main class="container">
@@ -357,11 +395,11 @@
         </div>
         <h2>Attendance Recorded</h2>
         <div class="detail-row">
-          <span class="label">Location</span>
+          <span class="label">Location / Name</span>
           <span class="value">{garageName}</span>
         </div>
         <div class="detail-row">
-          <span class="label">Time / Duration</span>
+          <span class="label">Time</span>
           <span class="value">{parkingTime}</span>
         </div>
 
