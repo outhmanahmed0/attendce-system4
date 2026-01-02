@@ -1,29 +1,64 @@
 <script>
+  import { onMount } from "svelte";
+
   let token = "";
-  let view = "welcome"; // Start at welcome screen
+  let view = "welcome";
   let scannedCode = "";
   let garageName = "";
   let parkingTime = "";
 
-  // New State variables
   let manualName = "";
   let showManualInput = false;
 
-  // Dummy History Data (Init with some data, but we will append real ones)
-  let history = [
-    {
-      id: 101,
-      location: "Central Garage",
-      time: "Yesterday, 09:00 AM",
-      status: "Present",
-    },
-    {
-      id: 102,
-      location: "North Campus",
-      time: "Yesterday, 08:30 AM",
-      status: "Late",
-    },
-  ];
+  // Dynamic Departments System
+  let departments = [];
+  let currentDepartmentId = null;
+  let editingDepartmentId = null;
+  let editingName = "";
+
+  // Load departments from localStorage or initialize defaults
+  onMount(() => {
+    const saved = localStorage.getItem("departments");
+    if (saved) {
+      departments = JSON.parse(saved);
+    } else {
+      departments = [
+        {
+          id: Date.now(),
+          name: "Department 1",
+          history: [
+            {
+              id: 101,
+              location: "Central Garage",
+              time: "Yesterday, 09:00 AM",
+              status: "Present",
+            },
+          ],
+        },
+        {
+          id: Date.now() + 1,
+          name: "Department 2",
+          history: [
+            {
+              id: 201,
+              location: "Workshop Area",
+              time: "Yesterday, 10:00 AM",
+              status: "Late",
+            },
+          ],
+        },
+      ];
+      saveDepartments();
+    }
+  });
+
+  function saveDepartments() {
+    localStorage.setItem("departments", JSON.stringify(departments));
+  }
+
+  // Get current department and history
+  $: currentDepartment = departments.find((d) => d.id === currentDepartmentId);
+  $: history = currentDepartment ? currentDepartment.history : [];
 
   // Helper: Format Time
   function getCurrentTimeStr() {
@@ -38,21 +73,19 @@
   function determineStatus() {
     const now = new Date();
     const hours = now.getHours();
-    // 8:00 (8) to 15:00 (3 PM)
     if (hours >= 8 && hours < 15) {
       return "Present";
     }
     return "Late";
   }
 
-  // --- STRICT REQUIRED FUNCTIONS (DO NOT MODIFY LOGIC, BUT ADDING UI FEEDBACK IS OK) ---
+  // --- STRICT REQUIRED FUNCTIONS ---
   function authenticate() {
     return new Promise((resolve, reject) => {
       my.getAuthCode({
         scopes: ["auth_base", "USER_ID"],
         success: (res) => {
           const authCode = res.authCode;
-          // my.alert({ content: 'Got auth code: ' + authCode }); // Optional debug
 
           fetch("https://its.mouamle.space/api/auth-with-superQi", {
             method: "POST",
@@ -125,7 +158,7 @@
               type: "qr",
               success: (res) => {
                 scannedCode = res.code;
-                my.alert({ content: "Scan successful: Code " + scannedCode }); // Added feedback
+                my.alert({ content: "Scan successful" });
 
                 fetch("https://its.mouamle.space/api/garage-info", {
                   method: "POST",
@@ -138,15 +171,18 @@
                   .then((r) => r.json())
                   .then((data) => {
                     garageName = data.name || "Garage " + scannedCode;
-                    parkingTime = data.parkingTime || "1 hour"; // API doesn't give time status, assume present or use logic?
-                    // Let's also log this scan to history
-                    addToHistory("Scanned: " + garageName);
+                    parkingTime = data.parkingTime || "Checked In";
+
+                    addToHistory("Unknown");
+
                     view = "details";
                   })
                   .catch(() => {
                     garageName = "Garage " + scannedCode;
-                    parkingTime = "1 hour";
-                    addToHistory("Scanned: " + garageName);
+                    parkingTime = "Checked In";
+
+                    addToHistory("Unknown");
+
                     view = "details";
                   });
               },
@@ -163,11 +199,19 @@
   function backToMain() {
     view = "main";
   }
-  // --- END ---
 
   // Navigation & Logic
   function enterApp() {
+    view = "department_select";
+  }
+
+  function selectDepartment(id) {
+    currentDepartmentId = id;
     view = "main";
+  }
+
+  function backToDepartmentSelect() {
+    view = "department_select";
   }
 
   function goToHistory() {
@@ -186,7 +230,14 @@
       time: "Today, " + getCurrentTimeStr(),
       status: status,
     };
-    history = [newRecord, ...history];
+
+    const dept = departments.find((d) => d.id === currentDepartmentId);
+    if (dept) {
+      dept.history = [newRecord, ...dept.history];
+      departments = departments; // Trigger reactivity
+      saveDepartments();
+    }
+
     return newRecord;
   }
 
@@ -196,15 +247,12 @@
       return;
     }
 
-    // Add to history log
     const record = addToHistory("Manual: " + manualName);
 
-    // Show confirmation
     my.alert({
       content: `Attendance registered for ${manualName}\nStatus: ${record.status}`,
     });
 
-    // Update Details view variables
     garageName = "User: " + manualName;
     parkingTime = record.time;
 
@@ -212,28 +260,92 @@
     manualName = "";
   }
 
-  // --- NEW: Report Delay Logic ---
   function reportDelay() {
     my.getLocation({
-      type: 1, // 1 = GCJ-02 (standard for Alipay)
+      type: 1,
       success: (res) => {
         console.log("Latitude:", res.latitude);
         console.log("Longitude:", res.longitude);
         console.log("Accuracy:", res.accuracy);
 
-        const locStr = `Lat: ${res.latitude}, Lng: ${res.longitude}`;
+        const locStr = `${res.latitude.toFixed(6)}, ${res.longitude.toFixed(6)}`;
+
         my.alert({
-          content:
-            "Latitude: " + res.latitude + "\nLongitude: " + res.longitude,
+          content: "Location sent to supervisor:\n" + locStr,
         });
 
-        // Log to history
-        addToHistory("Delay Reported: " + locStr);
+        addToHistory("Delay reported: " + locStr);
       },
       fail: (err) => {
         my.alert({
           content: "Failed to get location: " + JSON.stringify(err),
         });
+      },
+    });
+  }
+
+  // Department Management
+  function createDepartment() {
+    const name = prompt("Enter department name:");
+    if (name && name.trim()) {
+      departments = [
+        ...departments,
+        {
+          id: Date.now(),
+          name: name.trim(),
+          history: [],
+        },
+      ];
+      saveDepartments();
+    }
+  }
+
+  function startEdit(id, currentName) {
+    editingDepartmentId = id;
+    editingName = currentName;
+  }
+
+  function saveEdit() {
+    if (editingName.trim()) {
+      const dept = departments.find((d) => d.id === editingDepartmentId);
+      if (dept) {
+        dept.name = editingName.trim();
+        departments = departments;
+        saveDepartments();
+      }
+    }
+    editingDepartmentId = null;
+    editingName = "";
+  }
+
+  function cancelEdit() {
+    editingDepartmentId = null;
+    editingName = "";
+  }
+
+  function deleteDepartment(id) {
+    if (departments.length <= 1) {
+      my.alert({ content: "Cannot delete the last department!" });
+      return;
+    }
+
+    my.confirm({
+      title: "Delete Department",
+      content:
+        "Are you sure you want to delete this department? All history will be lost.",
+      confirmButtonText: "Delete",
+      cancelButtonText: "Cancel",
+      success: (res) => {
+        const confirmed =
+          res &&
+          (res.confirm === true ||
+            res === true ||
+            res.confirm === "confirm" ||
+            res.ok === true);
+        if (confirmed) {
+          departments = departments.filter((d) => d.id !== id);
+          saveDepartments();
+        }
       },
     });
   }
@@ -261,10 +373,167 @@
           >
         </div>
         <h1>Super Qi<br />Attendance</h1>
-        <p class="subtitle">Seamless tracking for a smarter workplace.</p>
+        <p class="subtitle">A program designed to record your attendance.</p>
         <button class="btn-primary-large" on:click={enterApp}
           >Get Started</button
         >
+      </div>
+    </div>
+
+    <!-- DEPARTMENT SELECTION VIEW -->
+  {:else if view === "department_select"}
+    <div class="view department-select-view">
+      <header class="department-header">
+        <h1>Select Department</h1>
+        <p>Where you want to record your attendance.</p>
+      </header>
+
+      <div class="department-grid">
+        {#each departments as dept}
+          <div class="department-card">
+            {#if editingDepartmentId === dept.id}
+              <div class="edit-mode">
+                <input
+                  type="text"
+                  bind:value={editingName}
+                  class="edit-input"
+                  on:keydown={(e) => e.key === "Enter" && saveEdit()}
+                />
+                <div class="edit-actions">
+                  <button class="btn-save" on:click={saveEdit}>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      ><polyline points="20 6 9 17 4 12"></polyline></svg
+                    >
+                  </button>
+                  <button class="btn-cancel" on:click={cancelEdit}>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      ><line x1="18" y1="6" x2="6" y2="18"></line><line
+                        x1="6"
+                        y1="6"
+                        x2="18"
+                        y2="18"
+                      ></line></svg
+                    >
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <button
+                class="dept-main"
+                on:click={() => selectDepartment(dept.id)}
+              >
+                <div class="dept-icon">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><rect x="3" y="3" width="7" height="7"></rect><rect
+                      x="14"
+                      y="3"
+                      width="7"
+                      height="7"
+                    ></rect><rect x="14" y="14" width="7" height="7"
+                    ></rect><rect x="3" y="14" width="7" height="7"></rect></svg
+                  >
+                </div>
+                <h2>{dept.name}</h2>
+                <p>{dept.history.length} records</p>
+              </button>
+              <div class="dept-controls">
+                <button
+                  class="btn-icon-sm"
+                  on:click={() => startEdit(dept.id, dept.name)}
+                  title="Edit name"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><path
+                      d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                    ></path><path
+                      d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                    ></path></svg
+                  >
+                </button>
+                <button
+                  class="btn-icon-sm btn-delete"
+                  on:click={() => deleteDepartment(dept.id)}
+                  title="Delete"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><polyline points="3 6 5 6 21 6"></polyline><path
+                      d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                    ></path></svg
+                  >
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/each}
+
+        <!-- Create New Department Card -->
+        <button class="department-card new-dept" on:click={createDepartment}>
+          <div class="new-dept-icon">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><line x1="12" y1="5" x2="12" y2="19"></line><line
+                x1="5"
+                y1="12"
+                x2="19"
+                y2="12"
+              ></line></svg
+            >
+          </div>
+          <h2>New Department</h2>
+        </button>
       </div>
     </div>
 
@@ -272,12 +541,26 @@
   {:else if view === "main"}
     <div class="view main-view">
       <header class="top-nav">
-        <h1>Registration</h1>
-        <button class="icon-btn" on:click={goToHistory} title="History">
+        <button class="section-badge" on:click={backToDepartmentSelect}>
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><polyline points="15 18 9 12 15 6"></polyline></svg
+          >
+          {currentDepartment?.name || "Department"}
+        </button>
+        <button class="btn-history-visible" on:click={goToHistory}>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -287,35 +570,61 @@
             ><path d="M12 8v4l3 3"></path><circle cx="12" cy="12" r="10"
             ></circle></svg
           >
+          <span>History</span>
         </button>
       </header>
 
       <div class="content-center">
-        <div class="scan-wrapper">
-          <div class="scanner-frame">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="60"
-              height="60"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#fff"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><rect x="3" y="3" width="18" height="18" rx="2" ry="2"
-              ></rect><line x1="12" y1="8" x2="12" y2="16"></line><line
-                x1="8"
-                y1="12"
-                x2="16"
-                y2="12"
-              ></line></svg
-            >
+        <div class="manual-section-primary">
+          <h2>Register by Name</h2>
+          <div class="input-group-large">
+            <input
+              type="text"
+              placeholder="Enter your name..."
+              bind:value={manualName}
+              class="input-large"
+            />
+            <button class="btn-confirm-large" on:click={submitManualAttendance}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><polyline points="20 6 9 17 4 12"></polyline></svg
+              >
+            </button>
           </div>
-          <button class="btn-scan-main" on:click={scan}>Scan Attendance</button>
         </div>
 
-        <!-- Delay Button -->
+        <div class="divider">
+          <span>OR</span>
+        </div>
+
+        <button class="btn-scan-secondary" on:click={scan}>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path
+              d="M17 3h2a2 2 0 0 1 2 2v2"
+            ></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path
+              d="M7 21H5a2 2 0 0 1-2-2v-2"
+            ></path></svg
+          >
+          Scan Attendance
+        </button>
+
         <button class="btn-delay" on:click={reportDelay}>
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -334,46 +643,8 @@
               y2="12"
             ></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg
           >
-          Report Delay (Send Location)
+          Report Delay (Location)
         </button>
-
-        <div class="divider">
-          <span>OR</span>
-        </div>
-
-        <div class="manual-entry-section">
-          {#if !showManualInput}
-            <button class="btn-text-action" on:click={toggleManualInput}
-              >Register by Name</button
-            >
-          {:else}
-            <div class="input-group slide-down">
-              <input
-                type="text"
-                placeholder="Enter your name"
-                bind:value={manualName}
-                class="input-modern"
-              />
-              <button class="btn-confirm" on:click={submitManualAttendance}>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><polyline points="20 6 9 17 4 12"></polyline></svg
-                >
-              </button>
-              <button class="btn-close" on:click={toggleManualInput}
-                >&times;</button
-              >
-            </div>
-          {/if}
-        </div>
       </div>
     </div>
 
@@ -397,9 +668,8 @@
             ></polyline></svg
           >
         </button>
-        <h1>Records</h1>
+        <h1>Records - {currentDepartment?.name || "Department"}</h1>
         <div style="width: 24px;"></div>
-        <!-- Spacer -->
       </header>
 
       <ul class="history-list-modern">
@@ -414,8 +684,9 @@
                 >{item.status}</span
               >
               {#if item.status === "Late"}
-                <!-- Pay Fine Button with Special Yellow Active State -->
-                <button class="btn-pay-fine" on:click={pay}>Pay Fine</button>
+                <button class="btn-pay-fine" on:click={pay}
+                  >Register Objection</button
+                >
               {/if}
             </div>
           </li>
@@ -443,6 +714,10 @@
         </div>
         <h2>Attendance Recorded</h2>
         <div class="detail-row">
+          <span class="label">Department</span>
+          <span class="value">{currentDepartment?.name || "Unknown"}</span>
+        </div>
+        <div class="detail-row">
           <span class="label">Location / Name</span>
           <span class="value">{garageName}</span>
         </div>
@@ -453,7 +728,7 @@
 
         <button class="btn-primary" on:click={backToMain}>Back to Home</button>
         <button class="btn-secondary" on:click={pay}
-          >Pay Fine (If Applicable)</button
+          >Register Objection (If applicable)</button
         >
       </div>
     </div>
@@ -461,14 +736,13 @@
 </main>
 
 <style>
-  /* --- GLOBAL VARIABLES & FONTS --- */
   @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
   :global(body) {
     margin: 0;
     font-family: "Inter", sans-serif;
-    background-color: #f8fafc; /* Very light blue-grey */
-    color: #1e293b; /* Slate 800 */
+    background-color: #f8fafc;
+    color: #1e293b;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -554,7 +828,198 @@
     transform: scale(0.96);
   }
 
-  /* --- HEADER SHARED --- */
+  /* --- DEPARTMENT SELECT VIEW --- */
+  .department-select-view {
+    background: #f8fafc;
+    padding: 24px;
+    overflow-y: auto;
+  }
+
+  .department-header {
+    text-align: center;
+    margin-bottom: 32px;
+    padding-top: 16px;
+  }
+
+  .department-header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0 0 8px 0;
+  }
+
+  .department-header p {
+    color: #64748b;
+    font-size: 14px;
+    margin: 0;
+  }
+
+  .department-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  /* Mobile responsive: single column on small screens */
+  @media (max-width: 400px) {
+    .department-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .department-select-view {
+      padding: 20px 16px;
+    }
+  }
+
+  .department-card {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px 16px;
+    position: relative;
+    transition: all 0.2s;
+  }
+
+  .department-card:hover {
+    border-color: #3b82f6;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.1);
+  }
+
+  .dept-main {
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .dept-icon {
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 12px;
+    color: #2563eb;
+  }
+
+  .department-card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 6px 0;
+  }
+
+  .department-card p {
+    font-size: 12px;
+    color: #64748b;
+    margin: 0;
+  }
+
+  .dept-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+  }
+
+  .btn-icon-sm {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    color: #64748b;
+    transition: all 0.2s;
+  }
+
+  .btn-icon-sm:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+
+  .btn-delete:hover {
+    background: #fef2f2;
+    color: #dc2626;
+    border-color: #fecaca;
+  }
+
+  .new-dept {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-style: dashed;
+    background: #f8fafc;
+  }
+
+  .new-dept:hover {
+    background: white;
+  }
+
+  .new-dept-icon {
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    color: #16a34a;
+  }
+
+  .edit-mode {
+    padding: 8px 0;
+  }
+
+  .edit-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #3b82f6;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 8px;
+    outline: none;
+  }
+
+  .edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .btn-save,
+  .btn-cancel {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-save {
+    background: #22c55e;
+    color: white;
+  }
+
+  .btn-cancel {
+    background: #e2e8f0;
+    color: #475569;
+  }
+
+  /* --- SHARED HEADER --- */
   .top-nav {
     display: flex;
     justify-content: space-between;
@@ -584,6 +1049,42 @@
     color: #0f172a;
   }
 
+  .section-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    padding: 8px 12px;
+    border-radius: 20px;
+    color: #475569;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .section-badge:hover {
+    background: #e2e8f0;
+  }
+
+  .btn-history-visible {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #f1f5f9;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 20px;
+    color: #0f172a;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-history-visible:hover {
+    background: #e2e8f0;
+  }
+
   /* --- MAIN VIEW --- */
   .main-view {
     justify-content: flex-start;
@@ -598,45 +1099,82 @@
     padding: 24px;
   }
 
-  .scan-wrapper {
-    position: relative;
+  .manual-section-primary {
     width: 100%;
-    max-width: 280px;
-    aspect-ratio: 1;
-    background: linear-gradient(135deg, #2563eb, #4f46e5);
-    border-radius: 32px;
+    background: white;
+    padding: 24px;
+    border-radius: 24px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+    text-align: center;
+    border: 1px solid #f8fafc;
+  }
+
+  .manual-section-primary h2 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .input-group-large {
     display: flex;
-    flex-direction: column;
+    gap: 12px;
+  }
+
+  .input-large {
+    flex: 1;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-large:focus {
+    border-color: #3b82f6;
+  }
+
+  .btn-confirm-large {
+    background: #0f172a;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    width: 54px;
+    display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 20px 40px rgba(37, 99, 235, 0.3);
-    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
   }
 
-  .scanner-frame {
-    margin-bottom: 16px;
-    opacity: 0.9;
-  }
-
-  .btn-scan-main {
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    padding: 12px 24px;
-    border-radius: 50px;
+  .btn-scan-secondary {
+    margin-top: 0;
+    background: none;
+    border: 2px dashed #94a3b8;
+    color: #64748b;
+    width: 100%;
+    padding: 16px;
+    border-radius: 16px;
     font-size: 16px;
     font-weight: 600;
-    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
     cursor: pointer;
+    transition: all 0.2s;
   }
-  .btn-scan-main:active {
-    background: rgba(255, 255, 255, 0.3);
+  .btn-scan-secondary:hover {
+    border-color: #3b82f6;
+    color: #3b82f6;
+    background: #eff6ff;
   }
 
   .btn-delay {
     margin-top: 24px;
-    background: #fff7ed; /* Light orange */
-    color: #c2410c; /* Dark orange */
+    background: #fff7ed;
+    color: #c2410c;
     border: 1px solid #ffedd5;
     padding: 10px 20px;
     border-radius: 12px;
@@ -653,7 +1191,7 @@
   }
 
   .divider {
-    margin: 32px 0;
+    margin: 24px 0;
     position: relative;
     width: 100%;
     text-align: center;
@@ -671,60 +1209,11 @@
   .divider span {
     position: relative;
     z-index: 2;
-    background: #ffffff; /* Match container bg */
+    background: #ffffff;
     padding: 0 12px;
     color: #94a3b8;
     font-size: 14px;
     font-weight: 500;
-  }
-
-  .btn-text-action {
-    color: #3b82f6;
-    background: none;
-    border: none;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .input-group {
-    display: flex;
-    width: 100%;
-    gap: 8px;
-  }
-
-  .input-modern {
-    flex: 1;
-    padding: 12px 16px;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    font-size: 16px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-  .input-modern:focus {
-    border-color: #3b82f6;
-  }
-
-  .btn-confirm {
-    background: #0f172a;
-    color: white;
-    border: none;
-    border-radius: 12px;
-    width: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-
-  .btn-close {
-    background: none;
-    border: none;
-    color: #94a3b8;
-    font-size: 24px;
-    cursor: pointer;
   }
 
   /* --- HISTORY VIEW --- */
@@ -782,7 +1271,6 @@
     color: #b91c1c;
   }
 
-  /* Yellow Active State for Pay Fine */
   .btn-pay-fine {
     font-size: 12px;
     font-weight: 600;
@@ -797,9 +1285,9 @@
 
   .btn-pay-fine:active,
   .btn-pay-fine:focus {
-    background-color: #fef08a; /* Soft Yellow */
-    border-color: #eab308; /* Darker Yellow Border */
-    color: #854d0e; /* Dark Yellow/Brown Text */
+    background-color: #fef08a;
+    border-color: #eab308;
+    color: #854d0e;
     transform: scale(0.95);
   }
 
