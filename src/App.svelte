@@ -10,13 +10,11 @@
   let manualName = "";
   let showManualInput = false;
 
-  // Dynamic Departments System
   let departments = [];
   let currentDepartmentId = null;
   let editingDepartmentId = null;
   let editingName = "";
 
-  // Load departments from localStorage or initialize defaults
   onMount(() => {
     const saved = localStorage.getItem("departments");
     if (saved) {
@@ -56,11 +54,9 @@
     localStorage.setItem("departments", JSON.stringify(departments));
   }
 
-  // Get current department and history
   $: currentDepartment = departments.find((d) => d.id === currentDepartmentId);
   $: history = currentDepartment ? currentDepartment.history : [];
 
-  // Helper: Format Time
   function getCurrentTimeStr() {
     return new Date().toLocaleTimeString("en-US", {
       hour: "numeric",
@@ -69,7 +65,6 @@
     });
   }
 
-  // Helper: Check if Late (8am - 3pm is NOT late)
   function determineStatus() {
     const now = new Date();
     const hours = now.getHours();
@@ -79,7 +74,6 @@
     return "Late";
   }
 
-  // --- STRICT REQUIRED FUNCTIONS ---
   function authenticate() {
     return new Promise((resolve, reject) => {
       my.getAuthCode({
@@ -200,7 +194,6 @@
     view = "main";
   }
 
-  // Navigation & Logic
   function enterApp() {
     view = "department_select";
   }
@@ -234,7 +227,7 @@
     const dept = departments.find((d) => d.id === currentDepartmentId);
     if (dept) {
       dept.history = [newRecord, ...dept.history];
-      departments = departments; // Trigger reactivity
+      departments = departments;
       saveDepartments();
     }
 
@@ -284,7 +277,6 @@
     });
   }
 
-  // Department Management
   function createDepartment() {
     const name = prompt("Enter department name:");
     if (name && name.trim()) {
@@ -352,7 +344,6 @@
 </script>
 
 <main class="container">
-  <!-- WELCOME VIEW -->
   {#if view === "welcome"}
     <div class="view welcome-view">
       <div class="welcome-content">
@@ -379,8 +370,6 @@
         >
       </div>
     </div>
-
-    <!-- DEPARTMENT SELECTION VIEW -->
   {:else if view === "department_select"}
     <div class="view department-select-view">
       <header class="department-header">
@@ -511,7 +500,6 @@
           </div>
         {/each}
 
-        <!-- Create New Department Card -->
         <button class="department-card new-dept" on:click={createDepartment}>
           <div class="new-dept-icon">
             <svg
@@ -536,8 +524,6 @@
         </button>
       </div>
     </div>
-
-    <!-- MAIN REGISTRATION VIEW -->
   {:else if view === "main"}
     <div class="view main-view">
       <header class="top-nav">
@@ -647,8 +633,6 @@
         </button>
       </div>
     </div>
-
-    <!-- HISTORY VIEW -->
   {:else if view === "history"}
     <div class="view history-view">
       <header class="top-nav">
@@ -693,8 +677,6 @@
         {/each}
       </ul>
     </div>
-
-    <!-- DETAILS VIEW -->
   {:else if view === "details"}
     <div class="view details-view">
       <div class="card details-card">
@@ -775,7 +757,6 @@
     }
   }
 
-  /* --- WELCOME VIEW --- */
   .welcome-view {
     background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
     color: white;
@@ -828,7 +809,6 @@
     transform: scale(0.96);
   }
 
-  /* --- DEPARTMENT SELECT VIEW --- */
   .department-select-view {
     background: #f8fafc;
     padding: 24px;
